@@ -1,11 +1,4 @@
----
-title: "Untitled"
-author: "Kaique S Alves"
-date: "12/09/2019"
-output: html_document
-editor_options: 
-  chunk_output_type: inline
----
+%Analysis
 
 # Packages 
 ```{r message=FALSE, warning=FALSE}
@@ -96,47 +89,15 @@ hlb <- hlbMG %>%
                              especie == "Tangerina" ~ "Mandarins",
                              especie == "Lima ácida" ~ "Acid lime")) %>% 
   mutate(regiao_geografica =  case_when(regiao_geografica == "CENTRAL" ~ "Central" ,
-                                        regiao_geografica == "TRIÂNGULO MINEIRO" ~"West",
-                                        regiao_geografica == "SUL DE MINAS" ~ "South"))
+                                        regiao_geografica == "TRIÂNGULO MINEIRO" ~"Triângulo Mineiro",
+                                        regiao_geografica == "SUL DE MINAS" ~ "South of Minas"))
 
 
 ```
 
-# Summary 
-
-Number of records
-```{r}
-length(hlbMG$codigo)
-```
 
 
-Number of years monitored
-```{r}
-hlb %>% 
-  summarise(N_years = length(unique(year)))
-
-```
-
-Number of Municipalities monitored
-
-```{r}
-hlb %>% 
-  summarise(N_mun = length(unique(municipio)))
-```
-
-## Farms
-N. of farms monitored 
-```{r}
-hlb %>%
-  filter(year == "2018", Semester == 2) %>%
-  group_by(regiao_geografica, municipio, produtor, propriedade) %>%
-  summarise(N_farms = n()) %>% 
-  ungroup() %>% 
-  summarise(n = n())
-```
-
-
-Some new entries had no region alocated for it, so I just completed with the previous information using the municipality as reference
+Some new entries had no region allocated for it, so I just completed with the previous information using the municipality as reference
 
 ```{r}
 aa = hlb %>% 
@@ -165,71 +126,145 @@ hh = hh %>%
 rm(aa, aa2, hh2, muni)
 ```
 
-N. of farms by municipality 
+## Classification by size
+
 ```{r}
-hh %>%
-  group_by(municipio, region) %>%
-  summarize(n = length(unique(propriedade))) %>% 
-  arrange(-n)
+hh_hlb = hh  %>% 
+  filter(!is.na(area)) %>%
+  mutate(class = case_when(area <= 10 ~ "Mini",
+                           area > 10 & area <= 50  ~ "Small",
+                           area > 50 & area <= 200  ~ "Medium",
+                           area > 200  ~ "Large")) %>% 
+  mutate(class = factor(class, levels = c("Mini", "Small", "Medium", "Large")))
+
+
 ```
 
-N. farms by region 
 
+
+
+# Loading Maping data
+## shape of Brazil 
 ```{r}
-hh %>%
+BRA <- ne_states(
+  country = "Brazil",
+  returnclass = "sf"
+)
+# subset spatial objects of only the states of interest
+MG <- BRA[BRA$name_en == "Minas Gerais", ]
+```
+
+## Shape of Minas Gerais and Mesoregions
+```{r}
+shape_MG = readOGR("shape_files/MG_Mesorregiao","MG_Mesorregiao_IBGE_2015_jul" )
+#
+shape_MG@data$id = rownames(shape_MG@data)
+MG_points = fortify(shape_MG)
+MG_df =plyr::join(MG_points, shape_MG@data, by="id")
+rm(MG_points)
+# plot(shape_MG)
+```
+
+## Shape of Minas Gerais and Municipalities
+```{r}
+shape_MG_mun = readOGR("shape_files/MG_municipios","MG_municipios_2014" )
+
+shape_MG_mun@data$id = rownames(shape_MG_mun@data)
+MG_points_mun = fortify(shape_MG_mun)
+MG_df_mun =plyr::join(MG_points_mun, shape_MG_mun@data, by="id")
+rm(MG_points_mun)
+```
+
+## Rename Regions 
+```{r}
+region_map_data = MG_df %>% 
+  filter(NM_MESO %in% c("CENTRAL MINEIRA",
+                        "TRIÃ‚NGULO MINEIRO/ALTO PARANAÃ\u008dBA",
+                        "SUL/SUDOESTE DE MINAS",
+                        "CAMPO DAS VERTENTES",
+                        "METROPOLITANA DE BELO HORIZONTE",
+                        "OESTE DE MINAS") ) %>% 
+  mutate(NM_MESO = case_when(NM_MESO == "TRIÃ‚NGULO MINEIRO/ALTO PARANAÃ\u008dBA" ~"Triângulo Mineiro",
+                              NM_MESO %in% c("CENTRAL MINEIRA",
+                                             "METROPOLITANA DE BELO HORIZONTE") ~ "Central",
+                              NM_MESO %in% c("CAMPO DAS VERTENTES",
+                                             "SUL/SUDOESTE DE MINAS",
+                                             "OESTE DE MINAS" ) ~ "South of Minas"))
+
+
+```
+
+# Reclassification of regions in the HLB data frame 
+```{r}
+rec_data = hh_hlb%>% 
+  group_by(codigo, produtor, propriedade, lat, lon,total_plantas) %>% 
+  # filter(Semester ==2) %>% 
+  mutate(cum_erradic = cumsum(count)) %>%
   filter(year == "2018", Semester == 2) %>%
-  group_by(regiao_geografica, municipio, produtor,  presenca, propriedade) %>%
-  summarise(N_farms = n()) %>% 
-  ungroup() %>% 
-  group_by(regiao_geografica) %>% 
-  summarise(n = n())
+  ungroup() #%>% 
+ # dplyr::select(lat,lon)
 ```
 
 
+```{r eval=FALSE}
+IDs = unique(region_map_data$id)
+location3 = numeric(length(hh_hlb$lat))
 
-## Area
-Farms' area
 
-```{r fig.height=3, fig.width=6, message=FALSE, warning=FALSE}
-hh %>% 
-  dplyr::select(region, municipio, area, presenca) %>% 
-  ggplot(aes(area)) +
-  geom_histogram()+
-  facet_wrap(~presenca, scales = "free_x")
+for(i in 1:length(IDs)){
+  qqq = region_map_data %>%
+    filter(id == IDs[i])
+
+  region = as.character(unique(qqq$NM_MESO))
+
+  for(j in 1:length(hh_hlb$lat)) {
+
+    pip = point.in.polygon(point.x = hh_hlb$lon[j],
+                           point.y = hh_hlb$lat[j],
+                           pol.x = qqq$long,
+                           pol.y = qqq$lat)
+
+    if(pip > 0){location3[j] = region}
+  }
+}
+
+hh_hlb$region = location3
+
 
 ```
 
+
+```{r include=FALSE}
+# I have this file save just for speed up the process, because I've already had run previous chunk
+# write.table(location3,"data/new_regions.txt")
+locations_load = read.table("data/new_regions.txt")
+location3 = locations_load$x 
+hh_hlb$region = location3
+```
+
+# Summary 
+
+Number of records
+```{r}
+length(rec_data$codigo)
+```
+
+
+Number of years monitored
+```{r}
+hlb %>% 
+  summarise(N_years = length(unique(year)))
+
+```
+
+Number of Municipalities monitored
 
 ```{r}
-hh %>% 
-  filter(year == "2018", Semester == 2) %>% 
-  group_by(region) %>% 
-  summarize(median_area = median(area, na.rm = T),
-            mean_area = mean(area, na.rm = T)) %>%
-  arrange(desc(mean_area))
-```
-
-```{r}
-hh %>% 
-  filter(year == "2018", Semester == 2) %>% 
-  group_by(especie) %>% 
-  summarise(area = mean(area, na.rm = T))
+hlb %>% 
+  summarise(N_mun = length(unique(municipio)))
 ```
 
 
-
-Mean/median farm's area by municipality 
-
-```{r}
-hh %>% 
-  filter(year == "2018", Semester == 2) %>% 
-  group_by(municipio) %>% 
-  summarize(median_area = median(area, na.rm = T),
-            mean_area = mean(area, na.rm = T)) %>%
-  arrange(desc(mean_area))
-
-
-```
 
 
 Number and percent of farms with and without HLB
@@ -249,31 +284,10 @@ hh %>%
 ```
 
 
-Number and percent of farms with and without HLB per region
-```{r}
-hh %>% 
-  group_by(codigo, produtor, propriedade) %>% 
-  # filter(Semester ==2) %>% 
-  mutate(cum_erradic = cumsum(count)) %>% 
-  filter(year == "2018", Semester == 2) %>%
-  group_by(region, municipio, produtor, presenca,lat,lon, propriedade) %>%
-  summarise(N_farms = n()) %>% 
-  ungroup() %>% 
-  group_by(presenca, region) %>% 
-  summarise(n  = n(),
-            percent = (n /852 )*100) 
-```
-## Classification by size
 
-```{r}
-hh_hlb = hh  %>% 
-  filter(!is.na(area)) %>%
-  mutate(class = case_when(area <= 10 ~ "Mini",
-                           area > 10 & area <= 50  ~ "Small",
-                           area > 50 & area <= 200  ~ "Medium",
-                           area > 200  ~ "Large")) %>% 
-  mutate(class = factor(class, levels = c("Mini", "Small", "Medium", "Large"))) 
-```
+
+
+
 
 Number of orchards by orchard size
 ```{r}
@@ -285,7 +299,7 @@ hh_hlb%>%
   group_by(region, municipio, produtor,class, presenca,lat,lon, propriedade) %>%
   summarise(N_farms = n()) %>% 
   ungroup() %>% 
-  group_by(presenca, class) %>% 
+  group_by(class) %>% 
   summarise(n  = n(),
             percent = (n /1487)*100
             )
@@ -303,7 +317,7 @@ hh %>%
   group_by(region, municipio, produtor,especie, presenca,lat,lon, propriedade) %>%
   summarise(N_farms = n()) %>% 
   ungroup() %>% 
-  group_by(presenca, especie) %>% 
+  group_by( especie) %>% 
   summarise(n  = n(),
             percent = (n /1488)*100
             )
@@ -408,17 +422,6 @@ hh %>%
 ```
 
 
-```{r}
-hh %>% 
-  filter(year == "2018", Semester == 2) %>%
-  group_by(region, municipio, produtor,especie, presenca, propriedade) %>%
-  summarise(N_farms = n()) %>% 
-  ungroup() %>% 
-  group_by(especie, region) %>% 
-  summarise(n = n()) %>% 
-  ggplot(aes(especie, n, fill = region))+
-  geom_col()
-```
 
 ## Mandarins
 ```{r}
@@ -427,7 +430,7 @@ erad_mandarins = hh_hlb %>%
   group_by(year, Semester,region,especie) %>%
   filter(especie %in% c("Mandarins")) %>% 
   unite(new_clas, region, especie, sep ="/", remove = F) %>%
-  filter(!new_clas %in% c("Central/Sweet orange","West/Mandarins")) %>% 
+  filter(!new_clas %in% c("Central/Sweet orange","Triângulo Mineiro/Mandarins")) %>% 
   summarise(errad = sum(count)) %>% 
   filter(errad>0) %>% 
   ggplot(aes(year, errad, color = Semester))+
@@ -453,7 +456,7 @@ erad_orange = hh_hlb %>%
   group_by(year, Semester,region,especie) %>%
   filter(especie %in% c("Sweet orange")) %>% 
   unite(new_clas, region, especie, sep ="/", remove = F) %>%
-  filter(!new_clas %in% c("Central/Sweet orange","West/Mandarins")) %>% 
+  filter(!new_clas %in% c("Central/Sweet orange","Triângulo Mineiro/Mandarins")) %>% 
   summarise(errad = sum(count)) %>% 
   filter(errad>0) %>% 
   ggplot(aes(year, errad, color = Semester))+
@@ -501,6 +504,71 @@ hh_hlb %>%
             perc_eradic = round((eradic/n_plants)*100,2)) %>% 
   arrange(desc(region))
 ```
+
+only by region
+
+```{r}
+hh_hlb %>% 
+  group_by(codigo, produtor, propriedade) %>% 
+  mutate(cum_erradic = cumsum(count)) %>%
+  filter(year == "2018", Semester == 2) %>%
+  # group_by(region, municipio, class, produtor, lat, lon, especie, presenca, propriedade) %>%
+  # summarise(N_farms = n()) %>% 
+  ungroup() %>% 
+  # filter(presenca != "Absent") %>% 
+  group_by(region) %>% 
+  summarise(n = n(),
+            area =  mean(area),
+            prev = sum((presenca == "Present")*1),
+            perc = round((prev/n)*100,2),
+            n_plants = sum(total_plantas),
+            eradic =sum(cum_erradic),
+            perc_eradic = round((eradic/n_plants)*100,2)) %>% 
+  arrange(desc(region))
+```
+ by specie 
+ 
+```{r}
+hh_hlb %>% 
+  group_by(codigo, produtor, propriedade) %>% 
+  mutate(cum_erradic = cumsum(count)) %>%
+  filter(year == "2018", Semester == 2) %>%
+  # group_by(region, municipio, class, produtor, lat, lon, especie, presenca, propriedade) %>%
+  # summarise(N_farms = n()) %>% 
+  ungroup() %>% 
+  # filter(presenca != "Absent") %>% 
+  group_by(especie) %>% 
+  summarise(n = n(),
+            area =  mean(area),
+            prev = sum((presenca == "Present")*1),
+            perc = round((prev/n)*100,2),
+            n_plants = sum(total_plantas),
+            eradic =sum(cum_erradic),
+            perc_eradic = round((eradic/n_plants)*100,2)) #%>% 
+  # arrange(desc(region))
+```
+ 
+no grouping
+```{r}
+hh_hlb %>% 
+  group_by(codigo, produtor, propriedade, lat, lon, especie,total_plantas) %>% 
+  mutate(cum_erradic = cumsum(count)) %>%
+  filter(year == "2018", Semester == 2) %>%
+  # group_by(region, municipio, class, produtor, lat, lon, especie, presenca, propriedade) %>%
+  # summarise(N_farms = n()) %>% 
+  ungroup() %>% 
+  # filter(presenca != "Absent") %>% 
+  # group_by(region) %>% 
+  summarise(n = n(),
+            area =  mean(area),
+            prev = sum((presenca == "Present")*1),
+            perc = round((prev/n)*100,2),
+            n_plants = sum(total_plantas),
+            eradic =sum(cum_erradic),
+            perc_eradic = round((eradic/n_plants)*100,2)) 
+```
+
+
 
 ## Mosaic plot
 
@@ -755,8 +823,10 @@ hh_hlb %>%
   group_by(region, municipio, class, produtor, lat, lon, especie, presenca, propriedade) %>%
   summarise(N_farms = n()) %>% 
   ungroup() %>% 
-  group_by(region, class) %>% 
+  group_by(region,  especie) %>% 
   summarise(n= n()) %>% 
+  filter(especie %in% c("Mandarins", "Sweet orange")) %>% 
+  spread(especie,n) %>% 
   arrange(desc(region))
   
 
@@ -835,7 +905,7 @@ hh_hlb %>%
             mean_inc = mean(Incidencia),
             sd_inc = sd(Incidencia)) %>%
   unite(new_clas, region, especie, sep ="/", remove = F) %>%
-  filter(!new_clas %in% c("Central/Sweet orange","West/Mandarins")) %>% 
+  filter(!new_clas %in% c("Central/Sweet orange","Triângulo Mineiro/Mandarins")) %>% 
   # arrange(region) %>% 
   # ungroup() %>% 
   # summarise(sum(n))
@@ -872,10 +942,11 @@ stat_box_data <- function(y, upper_limit = max(iris$Sepal.Length) * 1.15) {
   filter(presenca == "Present") %>%
   filter(!especie %in% c("Acid lime", "Lemon")) %>%
   unite(new_clas, region, especie, sep ="/", remove = F) %>%
-  filter(!new_clas %in% c("Central/Sweet orange","West/Mandarins"),
+  filter(!new_clas %in% c("Central/Sweet orange","Triângulo Mineiro/Mandarins"),
          especie == "Mandarins") %>% 
-  group_by(region, municipio,class, especie,total_plantas, propriedade)%>% 
-  summarise(incidence = sum(cum_erradic)/total_plantas) %>% 
+  group_by(region, municipio, class, especie, total_plantas, propriedade,produtor,codigo)%>%
+  # summarise(n())
+  summarise(incidence = sum(cum_erradic)/unique(total_plantas)) %>% 
   filter(incidence>0) %>%
   group_by(region, class, especie) %>%
   filter(incidence < quantile(incidence,0.99)) %>%
@@ -903,7 +974,7 @@ inc_orange = hh_hlb %>%
   filter(presenca == "Present") %>%
   filter(!especie %in% c("Acid lime", "Lemon")) %>%
   unite(new_clas, region, especie, sep ="/", remove = F) %>%
-  filter(!new_clas %in% c("Central/Sweet orange","West/Mandarins"),
+  filter(!new_clas %in% c("Central/Sweet orange","Triângulo Mineiro/Mandarins"),
          especie == "Sweet orange") %>% 
   group_by(region, municipio,class, especie,total_plantas, propriedade)%>% 
   summarise(incidence = sum(cum_erradic)/total_plantas) %>% 
@@ -980,12 +1051,6 @@ hh_hlb %>%
   summarise(prev_rate = sum(length(unique(propriedade)))/(max(as.numeric(year)) - min(as.numeric(year))), 
             detection_year = min(as.numeric(year)),
             (max(as.numeric(year)) - min(as.numeric(year))))
-```
-
-
-Function for fitting epidemic models
-```{r}
-# source("fit_lin.R")
 ```
 
 
@@ -1153,11 +1218,11 @@ cum_prev_total2 = cum_prev2 %>%
 ```
 
 
-#### Orange West
+#### Orange Triângulo Mineiro
 ```{r}
 west_south_prev = cum_prev_total2%>%
   filter(especie %in% c("Sweet orange")) %>%
-  filter(region %in% c("West","South")) %>% 
+  filter(region %in% c("Triângulo Mineiro","South of Minas")) %>% 
   group_by(year,region) %>%
   mutate(total_prev = sum(c_prev)) %>% 
       ggplot()+
@@ -1179,7 +1244,7 @@ west_south_prev
 ```{r}
 central_south_prev = cum_prev_total2%>%
   filter(especie %in% c("Mandarins"),
-         region %in% c("South","Central")
+         region %in% c("South of Minas","Central")
          ) %>% 
   group_by(year,region) %>%
   mutate(total_prev = sum(c_prev)) %>% 
@@ -1208,11 +1273,11 @@ ggsave("figs/prevalence.png", dpi=600, height =5.5,width = 7)
 ```
 
 
-#### Mandarin South
+#### Mandarin South of Minas
 ```{r}
 Mand_south_prev = cum_prev_total2%>%
   filter(especie %in% c("Mandarins"),
-         region %in% c("South"),
+         region %in% c("South of Minas"),
          # class != "Large"
          ) %>% 
       group_by(year) %>%
@@ -1264,64 +1329,10 @@ central_prev
 
 ```{r}
 plot_grid(central_prev, Mand_south_prev, rel_widths = c(0.75,1),
-          labels = c("Central","South"))
+          labels = c("Central","South of Minas"))
 # ggsave("figs/mandarin_prevalence.png", dpi=600, width = 7,height =4)
 ```
 
-
-
-
-## Infection rate
-
-```{r message=FALSE, warning=FALSE}
-inf_rate_prev = cum_prev_total %>% 
-  ungroup() %>% 
-   # filter(prev_perc>0) %>%
-  group_by(region, class) %>% 
-   summarise(r = fit_lin(time = year, y = prev_perc/100)$`Infection rate`[1],
-             se = fit_lin(time = year, y = prev_perc/100)$`Infection rate`[1,2],
-            r_ci_lwr  = fit_lin(time = year, y = prev_perc/100)$`Infection rate`[1,3],
-            r_ci_upr  = fit_lin(time =year, y = prev_perc/100)$`Infection rate`[1,4],
-            model = rownames(fit_lin(time = year, y = prev_perc/100)$`Infection rate`)[1]) %>% 
-  ungroup() %>% 
-  mutate(shape = case_when(model == "Exponential" ~ 2 ,
-                              model == "Monomolecular" ~ 2 ,
-                              model == "Logistic" ~ 2 ,
-                              model == "Gompertz" ~  0.999 )) %>% 
-  mutate(r_scaled = r / (2*shape+2),
-         r_cilwr_scale = r_ci_lwr / (2*shape+2),
-         r_ciupr_scale = r_ci_upr / (2*shape+2)) %>% 
-  
-  mutate(n = 1:11) %>% 
-  filter(n != 3)
-
-inf_rate_prev %>% 
-  arrange(desc(region))
-```
-
-infection rate
-```{r}
-inf_rate_prev %>% 
-ggplot(aes(class, r, color = model))+
-  geom_point(position = position_dodge(width = 0.3))+
-  geom_errorbar(aes(ymin = r_ci_lwr, ymax = r_ci_upr), width = 0.2,position = position_dodge(width = 0.3))+
-  scale_color_colorblind()+
-  # ylim(-0.25,2)+
-  facet_wrap(~region, scales = "free_x")
-```
-
-weighted absolute rate
-```{r message=FALSE, warning=FALSE}
-inf_rate_prev %>% 
-    ggplot(aes(class, r_scaled, color = model))+
-      geom_point(position = position_dodge(width = 0.3))+
-      geom_errorbar(aes(ymin = r_cilwr_scale, ymax = r_ciupr_scale), width = 0.2,position = position_dodge(width = 0.3))+
-      scale_color_colorblind()+
-      # ylim(-0.25,2)+
-      facet_wrap(~region, scales = "free_x")+
-      labs(x = "Farms size", y = "Infection rate rescaled")
-
-```
 
 
 # Spatial analysis 
@@ -1343,6 +1354,7 @@ hlb_utm = hh_hlb %>%
 ```
 
 ## Maximum extent over year 
+### Whole state
 
 ```{r}
 d = NULL
@@ -1381,7 +1393,7 @@ ggplot(aes(years, d))+
   theme_minimal_hgrid(font_size = 10)+
   labs(y = "Distance (km)", x = "Year")
 max_dist
-ggsave("figs/max_dist.png", dpi = 600, height =4, width = 4  )
+# ggsave("figs/max_dist.png", dpi = 600, height =4, width = 4  )
 ```
 rate
 
@@ -1389,6 +1401,123 @@ rate
 max(d, na.rm = T)/(max(as.numeric(years))-min(as.numeric(years)))
 ```
 
+### Reginal
+```{r}
+region_list = list(c("South of Minas", "Central"),
+     "Triângulo Mineiro")
+d = matrix(0,nrow=14,ncol=2)
+years = unique(hlb_utm$year)
+for(k in 1:2){
+for(i in 4:length(years)){
+  try({
+hlb_dist = hlb_utm %>%
+  group_by(codigo,produtor, lat, lon) %>% 
+  mutate(prevalencia = cumsum(count)) %>% 
+  filter(prevalencia>0) %>% 
+  ungroup() %>% 
+  filter(year ==years[i],
+         region %in% region_list[[k]]
+         ) %>% 
+  dplyr::select(lon, lat) %>% 
+  mutate(ID = 1:length(lat),
+         ZZZ = 1)
+
+# coord = cbind(hlb_dist$lon,hlb_dist$lat)
+ 
+dist_df = hlb_dist %>% full_join(hlb_dist,c("ZZZ"="ZZZ")) %>% 
+        filter(ID.x != ID.y) %>% 
+        mutate(dist=sqrt((lon.x-lon.y)^2 + (lat.x-lat.y)^2))
+
+d[i,k] = max(dist_df$dist)/1000
+},silent = T
+)
+}}
+```
+
+```{r}
+data.frame(d = d, years = as.numeric(years)) %>% 
+  rename( `South of Minas & Central` = d.1,
+          `Triângulo Mineiro`=d.2) %>% 
+  gather(1:2, key = "region", value = "d") %>% 
+  mutate(d = case_when(d<=0 ~0,
+                       d>0 ~d)) %>% 
+  group_by(region) %>% 
+  mutate(dif = diff(c(0,d))) %>% 
+  group_by(region) %>% 
+  summarise(mean(dif))
+```
+
+```{r}
+data.frame(d = d, years = as.numeric(years)) %>% 
+  rename( `South of Minas & Central` = d.1,
+          `Triângulo Mineiro`=d.2) %>% 
+  gather(1:2, key = "region", value = "d") %>% 
+  mutate(d = case_when(d<=0 ~0,
+                       d>0 ~d)) %>% 
+  group_by(region) %>% 
+  mutate(dif = diff(c(0,d))) %>% 
+  filter(d>0) %>%
+ggplot(aes(years, log(d), color = region))+
+  # geom_line()+
+  geom_point(size = 2)+
+  # geom_line(size =1, alpha = 0.2)+
+  scale_y_continuous(breaks = seq(0, 1000, by =250))+
+  scale_x_continuous(breaks = seq(2006, 2018, by =2), limits = c(2007,2018))+
+  geom_smooth(method = "gam", se = F,formula = y ~ s(x, bs = "cs", k=5))+
+  scale_color_manual(values = c("orange","steelblue"))+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(y = "Distance (km)", x = "Year")
+# max_dist
+# ggsave("figs/max_dist.png", dpi = 600, height =4, width = 4  )
+
+log(2)
+```
+
+```{r}
+data_gam = data.frame(d = d, years = as.numeric(years)) %>% 
+  rename( `South of Minas & Central` = d.1,
+          `Triângulo Mineiro`=d.2) %>% 
+  gather(1:2, key = "region", value = "d") %>% 
+  mutate(d = case_when(d<=0 ~0,
+                       d>0 ~d),
+         region =  as.factor(region)) %>% 
+  filter(d>0)
+```
+
+
+```{r}
+gam1 = mgcv::gam(d ~ region + s(years, by = region, bs = "tp", k = 5),data =data_gam)
+# plot(gam1)
+# summary(gam1)
+emmeans::emtrends(gam1,  var ="years","region"  )
+
+
+```
+
+
+```{r}
+new = data.frame(years = c(seq(2008,2018, by=0.1),seq(2010,2018, by=0.1)),
+                 region = c(rep("South of Minas & Central",101),
+                            rep("Triângulo Mineiro",81)))
+pred = predict(gam1,new, se.fit=T)
+max_dist =
+  new %>% 
+  mutate(predicted = pred$fit,
+         se = pred$se.fit,
+         CL = predicted-1.96*se,
+         CU = predicted+1.96*se) %>% 
+  ggplot()+
+  geom_point(data = data_gam,aes(years, d, color = region),size = 2 )+
+  geom_ribbon(aes(years,ymin = CL, ymax = CU, group = region), fill = "gray70", alpha = 0.3)+
+  geom_line(aes(years, predicted, color = region),size = 2)+
+  theme_minimal_hgrid(font_size = 10)+
+  scale_x_continuous(breaks = seq(2008,2018, by = 2))+
+  scale_color_manual(values = c("orange","steelblue"))+
+  labs(color = "",x = "Year", y ="Distance (km)")+
+    theme(legend.position = c(0.05,0.8))
+max_dist    
+
+```
 
 
 ## Nearest-neighbour distances
@@ -1461,7 +1590,7 @@ data.frame(NND_all) %>%
 
 ### Regional
 
-#### Sweet orange in the west
+#### Sweet orange in the Triângulo Mineiro
 
 ##### Function
 
@@ -1469,17 +1598,17 @@ data.frame(NND_all) %>%
 nnd_regional = function(data, case, regions, species, start_season){
 if(case ==1){
    data2 = data %>%
-     filter(region %in% "West") %>%
+     filter(region %in% "Triângulo Mineiro") %>%
      filter(especie %in% "Sweet orange")
 }
   if(case ==2){
    data2 = data %>%
-     filter(region %in% "South") %>%
+     filter(region %in% "South of Minas") %>%
      filter(especie %in% "Sweet orange")
   }
     if(case ==3){
    data2 = data %>%
-     filter(region %in% c("South","Central")) %>%
+     filter(region %in% c("South of Minas","Central")) %>%
      filter(especie %in% "Mandarins")
     }
   if(case ==4){
@@ -1524,7 +1653,7 @@ bins = 20
 plot_grid(
 as.data.frame(nnd_regional(data = hlb_utm,
                            case = 1,
-                           regions = "West",
+                           regions = "Triângulo Mineiro",
                            species = "Sweet orange",
                            start_season = start)) %>%
   mutate(nnd = as.character(nnd), nnd = as.numeric(nnd),
@@ -1543,7 +1672,7 @@ as.data.frame(nnd_regional(data = hlb_utm,
 
 as.data.frame(nnd_regional(data = hlb_utm,
                            case = 2,
-                           regions = "South",
+                           regions = "South of Minas",
                            species = "Sweet orange",
                            start_season = start)) %>%
   mutate(nnd = as.character(nnd), nnd = as.numeric(nnd),
@@ -1561,7 +1690,7 @@ as.data.frame(nnd_regional(data = hlb_utm,
 ,
 as.data.frame(nnd_regional(hlb_utm,
                            case = 3,
-                        regions = c("South","Central"),
+                        regions = c("South of Minas","Central"),
                         species = "Mandarins",
                         start_season = start)) %>%
   mutate(nnd = as.character(nnd), nnd = as.numeric(nnd),
@@ -1578,38 +1707,38 @@ as.data.frame(nnd_regional(hlb_utm,
   theme_minimal_hgrid(),
 #plot grid config
 nrow = 3, labels = "AUTO")
-ggsave("figs/nnd_strata.png", dpi = 600, height =7, width = 10  )
+# ggsave("figs/nnd_strata.png", dpi = 600, height =7, width = 10  )
 ```
 
 ```{r}
 start = 9
 nnd_data = data.frame(nnd_regional(hlb_utm,
                                    case = 1,
-                                   region = "West",
+                                   region = "Triângulo Mineiro",
                                    species = "Sweet orange",
                                    start_season = start)
            ) %>% 
-  mutate(type = "West - Sweet orange") %>% 
+  mutate(type = "Triângulo Mineiro - Sweet orange") %>% 
   bind_rows(
 data.frame(nnd_regional(hlb_utm,
                         case =2,
-                        region = "South",
+                        region = "South of Minas",
                         species = "Sweet orange",
                         start_season = start)) %>%
-  mutate(type = "South - Sweet orange")  
+  mutate(type = "South of Minas - Sweet orange")  
     
   )%>% 
   bind_rows(
     data.frame(nnd_regional(hlb_utm,
                             case =3,
-                        region = c("South","Central"),
+                        region = c("South of Minas","Central"),
                         species = "Mandarins",
                         start_season = start)) %>% 
-      mutate(type = "South/Central - Mandarins")
+      mutate(type = "South of Minas/Central - Mandarins")
       )%>%
   mutate(nnd = as.character(nnd), nnd = as.numeric(nnd),
          year = as.character(year),year = as.numeric(year),
-         type = factor(type,levels =c("West - Sweet orange","South - Sweet orange","South/Central - Mandarins") ))
+         type = factor(type,levels =c("Triângulo Mineiro - Sweet orange","South of Minas - Sweet orange","South of Minas/Central - Mandarins") ))
 ```
 ```{r}
 quantile_data = nnd_data%>% 
@@ -1664,7 +1793,7 @@ lm_nnd = glmer(nnd ~ type*semester+(1|year), family = Gamma, data = nnd_data %>%
 # summary(lm_nnd)
 as.data.frame(emmeans::emmeans(lm_nnd, ~type**semester, transform="response")) %>% 
   bind_rows(overal_model_data) %>% 
-  mutate(type = factor(type,levels =c("Minas Gerais", "West - Sweet orange","South - Sweet orange","South/Central - Mandarins") )) %>% 
+  mutate(type = factor(type,levels =c("Minas Gerais", "Triângulo Mineiro - Sweet orange","South of Minas - Sweet orange","South of Minas/Central - Mandarins") )) %>% 
   ggplot(aes(type, response, color =  semester))+
   geom_errorbar(aes(ymin =asymp.LCL, ymax = asymp.UCL,),
                 size =1, position = position_dodge(width = 0.3),width =0)+
@@ -1682,7 +1811,7 @@ as.data.frame(emmeans::emmeans(lm_nnd, ~type**semester, transform="response")) %
   scale_y_continuous(breaks = seq(0,30, by=10), limits = c(0,30))+
   # scale_x_discrete(guide = guide_axis(n.dodge = 2))+
   theme(legend.position = "bottom")
-ggsave("figs/nnd_modeled.png", dpi = 600, height =4, width = 7  )
+# ggsave("figs/nnd_modeled.png", dpi = 600, height =4, width = 7  )
 
 ```
 
@@ -1750,7 +1879,7 @@ oring_plot = as.data.frame(E_all) %>%
   facet_wrap(~year)+
   scale_color_colorblind()
 oring_plot  
-ggsave("figs/oring.png", dpi = 600, height = 7, width = 8)
+# ggsave("figs/oring.png", dpi = 600, height = 7, width = 8)
 ```
 
 ### Regional
@@ -1759,17 +1888,17 @@ ggsave("figs/oring.png", dpi = 600, height = 7, width = 8)
 oring_regional = function(data, case){
 if(case ==1){
    data2 = data %>%
-     filter(region %in% "West") %>%
+     filter(region %in% "Triângulo Mineiro") %>%
      filter(especie %in% "Sweet orange")
 }
   if(case ==2){
    data2 = data %>%
-     filter(region %in% "South") %>%
+     filter(region %in% "South of Minas") %>%
      filter(especie %in% "Sweet orange")
   }
     if(case ==3){
    data2 = data %>%
-     filter(region %in% c("South","Central")) %>%
+     filter(region %in% c("South of Minas","Central")) %>%
      filter(especie %in% "Mandarins")
   }
 
@@ -1792,7 +1921,7 @@ OR_data = data2 %>%
 
 W <- owin( c(min(OR_data$lon), max(OR_data$lon)), c(min(OR_data$lat), max(OR_data$lat)), inhomogeneous = T)
 x = as.ppp(OR_data, W=W)
-E <- envelope(x, ring, nsim = 99, nrank = 1, global = TRUE, i ="0", j =  "1",verbose = F)
+E <- envelope(x, ring, nsim = 999, nrank = 1, global = TRUE, i ="0", j =  "1",verbose = F)
 E = cbind(year = years[i], semester = k, as.matrix(E))
 E_all = rbind(E_all,E)
 }
@@ -1811,22 +1940,22 @@ return(as.data.frame(E_all) %>%
 #### Calculating oring
 ```{r message=FALSE}
 regional_oring = oring_regional(data = hlb_utm,case = 1)%>% 
-  mutate(type = "West - Sweet orange") %>% 
+  mutate(type = "Triângulo Mineiro - Sweet orange") %>% 
   bind_rows(
 oring_regional(data = hlb_utm,case = 2)%>% 
-  mutate(type = "South - Sweet orange")) %>% 
+  mutate(type = "South of Minas - Sweet orange")) %>% 
   bind_rows(
 oring_regional(data = hlb_utm,case = 3)%>% 
-  mutate(type = "South/Central - Mandarins")) 
+  mutate(type = "South of Minas/Central - Mandarins")) 
   
 ```
 
 ##### Visualization
 ```{r}
 region_oring = regional_oring %>%
-  mutate(type = factor(type,levels =c("West - Sweet orange","South - Sweet orange","South/Central - Mandarins") )) %>% 
+  mutate(type = factor(type,levels =c("Triângulo Mineiro - Sweet orange","South of Minas - Sweet orange","South of Minas/Central - Mandarins") )) %>% 
   ggplot()+
-  geom_ribbon(aes(r,ymin =lo, ymax = hi, fill = "95% CE"), alpha = 0.9)+
+  geom_ribbon(aes(r,ymin =lo, ymax = hi, group=semester,fill = "95% CE"), alpha = 0.9)+
   geom_line(aes(r,obs, linetype = semester,group=semester, color = "Observed"),size = 1 )+
   geom_line(aes(r, theo, color = "Theorical"),size = 1 )+
   labs(x = "Distance (km)", y = "O-ring(r)", color ="", fill  = "", linetype = "Semester")+
@@ -1836,7 +1965,7 @@ region_oring = regional_oring %>%
   scale_color_colorblind()+
  theme(legend.position = "bottom")
 region_oring
-ggsave("figs/oring_regional.png", dpi = 600, height = 4, width = 8)
+# ggsave("figs/oring_regional.png", dpi = 600, height = 4, width = 8)
 ```
 
 
@@ -1846,7 +1975,7 @@ ggsave("figs/oring_regional.png", dpi = 600, height = 4, width = 8)
 plot_grid(nnd_region, region_oring, 
           nrow = 2,
           labels = "AUTO", rel_heights =  c(0.8,1), scale = 1)
-ggsave("figs/combo_spt.png", dpi=600, height = 6, width = 8)
+ggsave("figs/combo_spt.png", dpi=600, height = 6, width = 10)
 ```
 
 
@@ -1923,62 +2052,33 @@ plot_grid(bp_prev, bp_region, bp_class, nrow = 1, labels = c("A","B","C"))
 don't run below, pretty heavy 
 
 
+
+
+
 # Maps
-
-```{r}
-BRA <- ne_states(
-  country = "Brazil",
-  returnclass = "sf"
-)
-# subset spatial objects of only the states of interest
-MG <- BRA[BRA$name_en == "Minas Gerais", ]
-```
-
-```{r}
-shape_MG = readOGR("shape_files/MG_Mesorregiao","MG_Mesorregiao_IBGE_2015_jul" )
-#
-shape_MG@data$id = rownames(shape_MG@data)
-MG_points = fortify(shape_MG)
-MG_df =plyr::join(MG_points, shape_MG@data, by="id")
-rm(MG_points)
-# plot(shape_MG)
-```
-
-
-
-
-```{r}
-shape_MG_mun = readOGR("shape_files/MG_municipios","MG_municipios_2014" )
-
-shape_MG_mun@data$id = rownames(shape_MG_mun@data)
-MG_points_mun = fortify(shape_MG_mun)
-MG_df_mun =plyr::join(MG_points_mun, shape_MG_mun@data, by="id")
-rm(MG_points_mun)
-```
-
 
 ```{r}
 ggplot() +
   geom_sf(data = BRA, fill = "white", color = "gray70")+
   geom_sf(data = MG, fill = "gray90", color = "gray70") +
   # coord_sf(datum = NA) +
-  geom_point(data = hh_hlb, aes(lon, lat, size = Total_erradicadas),
-             shape = 1) +
+  geom_point(data = hh_hlb %>% 
+               filter(
+                 # region == "Central",
+                      # lon < -45,
+                      # lat < - 19.8
+                 ), aes(lon, lat, color= region),size = .5) +
+  # geom_text(data = hh_hlb %>%
+  #              filter(
+  #                region == "South of Minas",
+  #                     lon < -48), aes(lon, lat, label= municipio), size =1)+
   ylim(-23, -14.5)+
   xlim(-51.3, -40)
 
 ```
 
-# Regions map
-```{r}
-region_map_data = MG_df %>% 
-  filter(NM_MESO %in% c("CENTRAL MINEIRA","TRIÃ‚NGULO MINEIRO/ALTO PARANAÃ\u008dBA","SUL/SUDOESTE DE MINAS","CAMPO DAS VERTENTES","METROPOLITANA DE BELO HORIZONTE","OESTE DE MINAS") ) %>% 
-  mutate(NM_MESO = case_when(NM_MESO == "TRIÃ‚NGULO MINEIRO/ALTO PARANAÃ\u008dBA" ~"West",
-                              NM_MESO %in% c("CENTRAL MINEIRA","METROPOLITANA DE BELO HORIZONTE") ~ "Central",
-                              NM_MESO %in% c("CAMPO DAS VERTENTES","SUL/SUDOESTE DE MINAS","OESTE DE MINAS" ) ~ "South"))
 
 
-```
 
 
 ```{r}
@@ -2115,7 +2215,7 @@ map_prg = hh_hlb %>%
         legend.position = "bottom")
 
 map_prg
-  ggsave("figs/map_overtime.png", dpi = 600, height = 8, width = 7)
+  # ggsave("figs/map_overtime.png", dpi = 600, height = 8, width = 7)
 ```
 
 ```{r}
@@ -2199,9 +2299,9 @@ ggsave("figs/map_combo.png",dpi= 600, height = 7, width = 10)
 
 
 
-##  Big Map (Don't run) 
+##  Big Map
 
-```{r}
+```{r eval=F}
 IDs = unique(MG_df_mun$id)
 location2 = numeric(length(hh_hlb$lat))
 for(i in 1:length(IDs)){
@@ -2223,7 +2323,7 @@ for(i in 1:length(IDs)){
 ```
 
 
-```{r}
+```{r eval=F}
 hh_hlb_new = hh_hlb %>%
   mutate(map_location = location2) %>%
   mutate(NM_MUNICIP = map_location) %>%
@@ -2238,8 +2338,12 @@ hh_hlb_new = hh_hlb %>%
   # mutate(region = max(region)) %>% 
   mutate(presenca = case_when(presenca== "Present" ~ "HLB present",
                               presenca== "Absent" ~ "Not present"))
+```
 
-median(c("Central", "South", "West"))
+
+```{r include=FALSE}
+# write.table(hh_hlb_new, "data/hh_hlb_new.txt")
+hh_hlb_new = read.table("data/hh_hlb_new.txt")
 ```
 
 ```{r}
@@ -2249,7 +2353,7 @@ hlb_new_shape = left_join(MG_df_mun, hh_hlb_new , by = "NM_MUNICIP") %>%
 
 ```
 
-```{r }
+```{r eval=F}
 hlb_for_map = hh_hlb %>%
   mutate(map_location = location2) %>%
   mutate(NM_MUNICIP = map_location) %>%
@@ -2258,6 +2362,12 @@ hlb_for_map = hh_hlb %>%
   ungroup() %>% 
   filter(year>=2018, Semester == 2) %>%
   dplyr::select(presenca, NM_MUNICIP,lat, lon)
+```
+
+
+```{r  include=FALSE}
+# write.table(hlb_for_map, "data/hlb_for_map.txt")
+hlb_for_map = read.table("data/hlb_for_map.txt")
 ```
 
 ```{r }
@@ -2305,39 +2415,6 @@ mun = ggplot()+
 mun
 
 ggsave("figs/map_presence.png", dpi = 600, height =7, width = 11 )
-```
-
-
-```{r}
-regi = ggplot()+
-  # geom_sf( data = BRA, fill = "white", color = "gray90")+
-  geom_sf(data = MG, fill = "gray60", color = NA) +
-  geom_polygon(dat = region_map_data, aes(long, lat, group = group, fill = NM_MESO), alpha=1) +
-  scale_fill_manual(values =c("#E69F00","#00BFC4","#003300"))+
-  ylim(-24, -13)+
-  xlim(-51.1, -40)+
-  labs(x = "Longitude", y = "Latitude", color = "", fill = "")+
-  guides(fill = guide_legend(override.aes = list(size=0.3)))+
- theme_bw()+
-  # theme_void()+
-  theme(legend.position = "right",
-        legend.title = element_text(size = 6), 
-              legend.text  = element_text(size = 6),
-              legend.key.size = unit(.7, "lines"),
-        text = element_blank(),
-        # # panel.background = element_blank(),
-        panel.grid.major = element_line(colour = NA),
-        panel.grid.minor = element_line(colour = NA),
-        axis.ticks = element_blank()
-        )
-
-regi
-```
-
-```{r}
-ggdraw(mun) +
-  draw_plot(regi,0.1, 0.66, 0.36, 0.36)
-# ggsave("figs/map_presence.png", dpi = 600, height =7, width = 7.7 )
 ```
 
 

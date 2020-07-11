@@ -1,0 +1,33 @@
+name: HLB_MG_spatiotemporal
+output_dir: docs
+output:
+  html_document:
+    code_download: true
+    css: my-style.css
+    theme: cosmo 
+    df_print: paged
+    highlight: default
+    include:
+      after_body: footer.md
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+    lib_dir: site_libs
+    self_contained: no
+bibliography: crossref.bib
+csl: chicago-author-date.csl
+navbar:
+  title: Spatiotemporal HLB MG
+  left:
+  - text: About
+    icon: fa fa-home
+    href: index.html
+  - text: Analysis 
+    icon: fa fa-file-code-o
+    href: main_code.html
+    
+  right:
+  - text: source
+    icon: fa-github-square
+    href: https://github.com/AlvesKS/paper-HLB-spatiotemporal
